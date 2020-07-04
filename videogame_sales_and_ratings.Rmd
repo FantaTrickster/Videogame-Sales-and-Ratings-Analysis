@@ -1,0 +1,441 @@
+---
+title: "Videogame Sales and Ratings Analysis"
+author: "Luca Morotti - 142112"
+output: html_document
+---
+
+## Incipit
+
+Lo scopo di questo progetto è rispondere a delle domande, tramite l'analisi di dati riguardanti il mercato videoludico.
+Il dataset "videogames.csv" è stato reperito sul sito "kaggle": https://www.kaggle.com/sidtwr/videogames-sales-dataset?select=Video_Games_Sales_as_at_22_Dec_2016.csv
+Il dato il cui nome è "Imagine: Makeup Artist" è stato alterato manualmente, in quanto presentava un anno di rilascio incorretto.
+
+```{r}
+
+videogames = read.csv("videogames.csv")
+
+
+```
+
+```{r include=FALSE}
+
+#librerie utilizzate nel progetto
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(modelr)
+library(gridExtra)
+library(stringr)
+library(tidytext)
+library(SnowballC)
+library(wordcloud)
+
+#esclusione delle colonne non inerenti al progetto
+videogames = videogames %>%
+  select(Name, Year_of_Release, Genre, NA_Sales:Critic_Count)
+
+#converto gli anni da stringhe a numeri
+videogames$Year_of_Release = as.numeric(as.character(videogames$Year_of_Release))
+
+
+```
+
+Il dataset contiene le vendite e gli eventuali rating di metacritic, dei giochi rilasciati dal 1980 al 2017.
+Tuttavia i dati raccolti nel 2017 sono parziali, mentre altri hanno data di rilascio sconosciuta.
+Questi dati verranno esclusi dal progetto. Idem per quelli con genere sconosciuto, in quanto sarà un fattore importante di analisi. 
+
+```{r}
+
+videogames = videogames %>%
+  filter(Genre!="" & Year_of_Release!="2017" & Year_of_Release!="N/A")
+
+```
+
+```{r include=FALSE}
+
+videogames
+
+```
+
+## **Parte 1: Generi**
+
+## Quali generi videoludici producono il maggior fatturato?
+
+I videogiochi sono suddivisi in generi, quindi è interessante capire se ce ne sono alcuni che fatturano più di altri.
+La funzione manualmente costruita "genre_sales_by_region" restituisce un diagramma a barre in base alla regione geografica selezionata.
+
+```{r include=FALSE}
+
+#funzione per il calcolo delle vendite totali dei generi in base alla regione geografica
+genre_sales_by_region = function(sales){
+  
+  #seleziono il tipo
+  #e poi sommo le vendite in base al genere
+  if(sales=="Global_Sales"){
+    genre_sales = videogames %>%
+      select(Genre, Global_Sales) %>%
+      group_by(Genre) %>%
+      summarise(Copies_Sold = sum(Global_Sales))
+  } else if(sales=="NA_Sales"){
+    genre_sales = videogames %>%
+      select(Genre, NA_Sales) %>%
+      group_by(Genre) %>%
+      summarise(Copies_Sold = sum(NA_Sales))
+  } else if(sales=="EU_Sales"){
+    genre_sales = videogames %>%
+      select(Genre, EU_Sales) %>%
+      group_by(Genre) %>%
+      summarise(Copies_Sold = sum(EU_Sales))
+  } else if(sales=="JP_Sales"){
+    genre_sales = videogames %>%
+      select(Genre, JP_Sales) %>%
+      group_by(Genre) %>%
+      summarise(Copies_Sold = sum(JP_Sales))
+  } else if(sales=="Other_Sales"){
+    genre_sales = videogames %>%
+      select(Genre, Other_Sales) %>%
+      group_by(Genre) %>%
+      summarise(Copies_Sold = sum(Other_Sales))
+  }
+  
+  #creo un bar plot che espone le vendite dei vari generi
+  plot = ggplot(data = genre_sales) +
+    geom_bar(aes(x=Genre,y=Copies_Sold, fill = c('A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L')), stat="identity") +
+    theme(
+      panel.background = element_rect(fill = "transparent"),
+      legend.position="none"
+      )
+  if(sales!="Global_Sales"){
+    plot= plot +
+      ggtitle(sales) +
+      theme(
+        axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title.y=element_blank()
+      )
+  }
+  return(plot)
+}
+
+```
+
+```{r message=FALSE}
+
+genre_sales_by_region("Global_Sales")
+
+```
+
+Dal diagramma possiamo dire che il genere Action è quello che nel corso degli anni ha fatturato di più, seguito dal genere sportivo e quello sparatutto.
+
+## Vale lo stesso per tutte le regioni geografiche?
+
+```{r message=FALSE}
+
+plot1 = genre_sales_by_region("NA_Sales")
+plot2 = genre_sales_by_region("EU_Sales")
+plot3 = genre_sales_by_region("JP_Sales")
+plot4 = genre_sales_by_region("Other_Sales")
+
+grid.arrange(plot1, plot2, plot3, plot4, ncol=2)
+
+```
+
+Interessante notare come il Nord America, l'Europa e le altre regioni siano allineate, mentre il Giappone presenti una grossa differenza: il genere del gioco di ruolo. Le vendite di quest'ultimo sono nettamente superiori rispetto agli altri generi. Infatti il Giappone in ambito videoludico è sempre stata famosa per i suoi RPG e questo ovviamente si ripercuote anche nelle vendite.
+
+## In riferimento ai generi più venduti: qual è la distribuzione delle loro vendite nel corso degli anni?
+
+Prima di andare ad analizzare la distribuzione delle vendite è utile capire quanti videogiochi sono stati registrati nei singoli anni, per comprendere l'andamento che prenderà il grafico.
+
+```{r message=FALSE}
+
+videogames %>%
+  ggplot(aes(Year_of_Release)) +
+  geom_freqpoly() +
+  theme_minimal()
+
+```
+
+Come possiamo notare molti dei videogiochi registrati sono compresi tra il 2000 al 2015, quindi immaginando una distribuzione bilanciata delle vendite possiamo aspettarci un andamento simile per il prossimo grafico.
+
+Anche in questo caso è stata utilizzata una funzione, ovvero "year_sales_by_region". Il primo parametro è identico alla scorsa, mentre il secondo determina se stampare la legenda o meno (utile più che altro nella stampa di più grafici simultaneamente, per rendere il tutto più leggibile). Il terzo è per aggiungere un altro genere all'analisi.
+
+```{r include=FALSE}
+
+#funzione per il calcolo delle vendite dei top 3 generi nel corso degli anni in base alla regione
+year_sales_by_region = function(sales, show, add){
+  
+  #seleziono il tipo di vendite
+  #e poi sommo le vendite in base all'anno e al genere
+  if(sales=="Global_Sales"){
+    year_sales = videogames %>%
+      select(Genre, Year_of_Release, Global_Sales) %>%
+      group_by(Genre, Year_of_Release) %>%
+      summarise(Copies_Sold = sum(Global_Sales))
+  } else if(sales=="NA_Sales"){
+    year_sales = videogames %>%
+      select(Genre, Year_of_Release, NA_Sales) %>%
+      group_by(Genre, Year_of_Release) %>%
+      summarise(Copies_Sold = sum(NA_Sales))
+  } else if(sales=="EU_Sales"){
+    year_sales = videogames %>%
+      select(Genre, Year_of_Release, EU_Sales) %>%
+      group_by(Genre, Year_of_Release) %>%
+      summarise(Copies_Sold = sum(EU_Sales))
+  } else if(sales=="JP_Sales"){
+    year_sales = videogames %>%
+      select(Genre, Year_of_Release, JP_Sales) %>%
+      group_by(Genre, Year_of_Release) %>%
+      summarise(Copies_Sold = sum(JP_Sales))
+  } else if(sales=="Other_Sales"){
+    year_sales = videogames %>%
+      select(Genre, Year_of_Release, Other_Sales) %>%
+      group_by(Genre, Year_of_Release) %>%
+      summarise(Copies_Sold = sum(Other_Sales))
+  }
+  
+  if(add!=""){
+    year_sales = year_sales %>%
+      filter(Genre=="Action" | Genre=="Sports" | Genre=="Shooter" | Genre==add)
+  } else {
+    year_sales = year_sales %>%
+      filter(Genre=="Action" | Genre=="Sports" | Genre=="Shooter")
+  }
+  
+  #creo un frequency polygon che espone le vendite dei vari generi nel corso degli anni
+  if(show==TRUE){
+    plot = ggplot(data = year_sales) + 
+      geom_freqpoly(mapping = aes(x = Year_of_Release, y = Copies_Sold, colour = Genre), stat="identity", size = 1.2) +
+      theme_minimal()
+  } else {
+    plot = ggplot(data = year_sales) + 
+      geom_freqpoly(mapping = aes(x = Year_of_Release, y = Copies_Sold, colour = Genre), stat="identity", size = 1.2) +
+      ggtitle(sales) +
+      theme(
+        panel.background = element_rect(fill = "transparent"),
+        panel.grid.major = element_line(size = 0.2, colour = "gray"),
+        panel.grid.minor = element_line(size = 0.2, colour = "gray"),
+        legend.position="none",
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank()
+        )
+  }
+  
+  return(plot)
+}
+
+```
+
+```{r message=FALSE}
+
+year_sales_by_region("Global_Sales", TRUE, "")
+
+```
+
+Come sospettato il grafico ha un picco nel periodo precedentemente citato. Le posizioni trovate in precedenza ("Action" al primo posto, "Sports" al secondo e "Shooter" al terzo) sono più o meno rispettate. Tuttavia ci sono dei picchi inaspettati.
+A questo punto può essere utile capire se ci sono stati dei videogiochi che hanno influenzato in maniera significativa il grafico. Per fare ciò è indispensabile osservare la distribuzione delle vendite per i singoli videogiochi.
+
+```{r message=FALSE}
+
+videogames %>%
+  ggplot(aes(Genre, Global_Sales)) +
+  geom_point(alpha=1/3) +
+  theme_minimal()
+
+```
+
+Notiamo come la distribuzione maggiore avvenga sotto le 20 milioni di copie vendute (in particolare sotte le 5).
+Inoltre c'è un gioco che si distacca in maniera magistrale dagli altri.
+
+```{r}
+
+videogames %>%
+  select(Name, Year_of_Release, Global_Sales) %>%
+  arrange(desc(Global_Sales)) %>%
+  head(1)
+
+
+```
+
+Tale gioco è Wii Sports e presenta 82.53 milioni di copie vendute. Il motivo è comprensibile: il gioco veniva dato in omaggio a chi all'epoca acquistò una Nintendo Wii. Quest'ultima è stata una console di grande successo, che spinse anche molte persone che non videogiocavano all'acquisto.
+Escludendo quindi le vendite globali dai 20 milioni in su, si ottiene il seguente risultato:
+
+```{r}
+
+videogames = videogames %>%
+  filter(Global_Sales < 20)
+
+year_sales_by_region("Global_Sales", TRUE, "")
+
+
+```
+
+La curva del genere sportivo si è molto ammorbidita, dimostrando che quella bassa quantità di videogiochi ha venduto talmente tanto da fare la differenza.
+Piccolo fun fact: il genere platform per un periodo ha superato le vendite degli altri.
+
+```{r message=FALSE}
+
+year_sales_by_region("Global_Sales", TRUE, "Platform")
+
+```
+
+## **Parte 2: Vendite e dipendenza**
+
+## In che modo si comportano le vendite regionali, al variare di quelle globali?
+
+Per rispondere a questa domanda sarà necessario creare dei modelli, usando dei regressori lineari.
+Prima di fare questo però, visto che andremo ad usare solo dati numerici, convertiamo il dataframe in matrice, per ottimizzare i tempi di esecuzione. Prendiamo inoltre in considerazione le vendite minori di 5 milioni di copie, in quanto la maggior parte dei dati è concentrata lì.
+
+```{r message=FALSE}
+matrix = videogames %>%
+  mutate(id = 1:nrow(videogames)) %>%
+  select(id, NA_Sales:Global_Sales) %>%
+  filter(Global_Sales < 5)
+
+matrix = data.matrix(matrix, rownames.force = NA)
+
+```
+
+Ora si procederà con la creazione dei modelli e gli eventuali grafici.
+
+```{r message=FALSE}
+
+mod1 = lm(NA_Sales ~ Global_Sales, data=videogames)
+mod2 = lm(EU_Sales ~ Global_Sales, data=videogames)
+mod3 = lm(JP_Sales ~ Global_Sales, data=videogames)
+mod4 = lm(Other_Sales ~ Global_Sales, data=videogames)
+
+plot1 = ggplot(data = videogames, aes(x = Global_Sales, y = NA_Sales)) +
+  geom_point() +
+  geom_abline(size=1.2, intercept = mod1$coefficients[1], slope = mod1$coefficients[2], color="blue") +
+  theme_minimal()
+
+plot2 = ggplot(data = videogames, aes(x = Global_Sales, y = EU_Sales)) +
+  geom_point() +
+  geom_abline(size=1.2, intercept = mod2$coefficients[1], slope = mod2$coefficients[2], color="blue") +
+  theme_minimal()
+
+plot3 = ggplot(data = videogames, aes(x = Global_Sales, y = JP_Sales)) +
+  geom_point() +
+  geom_abline(size=1.2, intercept = mod3$coefficients[1], slope = mod3$coefficients[2], color="blue") +
+  theme_minimal()
+
+plot4 = ggplot(data = videogames, aes(x = Global_Sales, y = Other_Sales)) +
+  geom_point() +
+  geom_abline(size=1.2, intercept = mod4$coefficients[1], slope = mod4$coefficients[2], color="blue") +
+  theme_minimal()
+
+grid.arrange(plot1, plot2, plot3, plot4, ncol=2)
+
+```
+
+Notiamo una buona correlazione tra le vendite americane ed europee nei confronti di quelle globali, al contrario di quelle giapponesi e delle altre regioni.
+
+## **Parte 3: Critica**
+
+## Come sono distribuite le vendite dei videogiochi in base ai voti della critica?
+
+I videogiochi vengono recensiti da diverse redazioni e le loro recensioni vengono raccolte in un sito chiamato "Metacritic".
+Per rispondere alla domanda escludiamo i giochi che, per questioni di età, non sono presenti sul sito. Poi si dovrà convertire lo score dei giochi e il numero di recensioni da stringhe a numeri. Infine si potrà osservare il risultato.
+
+```{r message=FALSE}
+
+videogames = videogames %>%
+  filter(!is.na(Critic_Score))
+
+videogames$Critic_Score = as.numeric(as.character(videogames$Critic_Score))
+videogames$Critic_Count = as.numeric(as.character(videogames$Critic_Count))
+
+ggplot(data = videogames, aes(x = Critic_Score, y = Global_Sales)) +
+  geom_point() +
+  geom_smooth(se = FALSE, size=1.4) +
+  theme_minimal()
+
+```
+
+## Dato un videogioco, quali sono le parole predominanti nelle sue recensioni?
+
+Ci si pone questa domanda per capire se ci sono dei fattori di discussione in comune tra le varie recensioni delle redazioni.
+Però nel dataset non sono presenti i dati delle singole recensioni, quindi come si può fare?
+Qui entra in gioco il dataset "StarFoxZero_Critics.csv", che riporta i dati delle recensioni di un gioco "campione" selezionato tramite la seguente logica: per avere (a livello teorico) recensioni abbastanza equilibrate si può provare a prendere il voto medio dei videogiochi analizzati e selezionare il gioco con più recensioni e pari voto.
+
+```{r message=FALSE}
+
+Critic_Mean = mean(videogames$Critic_Score)
+
+Critic_Mean = ceiling(Critic_Mean)
+
+videogames %>%
+  select(Name, Critic_Score, Critic_Count) %>%
+  filter(Critic_Score==Critic_Mean) %>%
+  arrange(desc(Critic_Count)) %>%
+  head(1)
+
+```
+
+```{r message=FALSE}
+
+SFZ_Critics = read.csv("StarFoxZero_Critics.csv", encoding = "UTF-8", stringsAsFactors = FALSE)
+
+```
+**Dataset costruito dal sottoscritto in base alle recensioni della seguente pagina: "https://www.metacritic.com/game/wii-u/star-fox-zero"**
+
+Per studiare le parole sarà prima di tutto necessario sostituire gli apici (normali e a carattere speciale) con spazi per evitare eventuali problemi, per poi scomporre le recensioni in singole parole.
+
+```{r message=FALSE}
+
+SFZ_TidyCritics = SFZ_Critics %>%
+  mutate(Critica = str_replace_all(Critica, "[’]", " ")) %>%
+  mutate(Critica = str_replace_all(Critica, "[']", " ")) %>%
+  unnest_tokens(word, Critica)
+
+SFZ_TidyCritics %>%
+  head(8)
+
+```
+
+Prima di procedere, per curiosità, ne si può approfittare per ricavare il numero di caratteri scritti da ogni singola redazione.
+
+```{r message=FALSE}
+
+wordcounts_by_critic = SFZ_TidyCritics %>%
+  group_by(Redazione) %>%
+  summarize(words = n()) %>%
+  arrange(desc(words))
+
+wbc_mean = mean(wordcounts_by_critic$words)
+
+ggplot(data = wordcounts_by_critic, aes(words)) +
+  geom_freqpoly(size=1.2) +
+  theme_minimal()
+
+```
+
+Tornando all'obbiettivo principale, però, si cerca di ricavare il numero di volte che una parola viene ripetuta e si sfrutta la funzione wordStem per raggruppare le radici delle parole (particolarmente utile in questo caso, vista la relativamente bassa dimensione del dataset). Infine si usa wordcloud per la visualizzazione.
+
+```{r message=FALSE}
+
+wordcounts = SFZ_TidyCritics%>%
+  anti_join(stop_words)
+
+wordcounts = wordcounts %>%
+  mutate(word = wordStem(word)) %>%
+  group_by(word) %>%
+  summarize(words = n()) %>%
+  arrange(desc(words))
+
+wordcloud(words = wordcounts$word, freq = wordcounts$words, max.words = 80)
+
+```
+
+Giustamente ci sono parole (come il nome del gioco) che vengono usate spesso, ma che non ci sono particolarmente utili. Quindi sarà meglio escluderle.
+
+```{r message=FALSE}
+wordcounts = wordcounts %>%
+  filter(word!="star" & word!="fox" & word!="game")
+
+wordcloud(words = wordcounts$word, freq = wordcounts$words, max.words = 80, scale=c(3.5,0.27))
+
+```
+
+Si possono notare delle parole usate più frequentemente, ma non c'è uno stacco così netto e molte parole del dataset non sono ripetute, rendendo le recensione abbastanza variegate. L'unica eccezione è la parola "control", che è stata spesso usata. Analizzando le critiche si può ipotizzare che ciò sia dovuto ai controlli "particolari" del gioco, in quanto si distaccano parecchio dalla serie di cui fa parte (Star Fox). Questo è stato, quindi, un elemento particolarmente discusso.
